@@ -1,0 +1,6 @@
+{
+    "product":"BDY_LSOA DEC_2021",
+    "where":"LSOA21NM LIKE 'Teignbridge%'",
+    "target":"oa/lsoa.json",
+    "layer":"lsoa"
+}

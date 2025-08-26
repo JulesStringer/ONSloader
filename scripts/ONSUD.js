@@ -5,7 +5,7 @@ const utils = require('../../OpenOSloader/scripts/utils.js');
 const Papa = require('papaparse');
 
 const headers = {
-    'User-Agent':'ACT_exploring (ACT contact-email:technical@actionclimateteignbridge.org)'
+    'User-Agent':'ACT_ONSUD download (ACT contact-email:technical@actionclimateteignbridge.org)'
 };
 
 function report(feature, arg){
