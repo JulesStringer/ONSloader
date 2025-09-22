@@ -74,13 +74,13 @@ function parseCSVFile(file, lad_cd) {
                             let keys = Object.keys(row);
                             console.log('keys: ' + keys);
                         }
-                        if ( row['LAD24CD'] === lad_cd){
+                        if ( row['LAD25CD'] === lad_cd){
                             let r = {
                                 X: row.GRIDGB1E,
                                 Y: row.GRIDGB1N,
                                 PC: row.PCDS,
-                                WD: row.WD24CD,
-                                PAR: row.PARNCP24CD,
+                                WD: row.WD25CD,
+                                PAR: row.PARNCP25CD,
                                 OA21: row.OA21CD,
                                 LSOA21: row.lsoa21cd,
                                 MSOA21: row.msoa21cd
@@ -195,9 +195,9 @@ async function run(){
         versions['uprn_lookup.json'] = version;
         await fs.promises.writeFile(versions_file, JSON.stringify(versions));
         // Now clear up
-        await fs.promises.rm(destfilepath, {recursive: true});
-        await fs.promises.rm(filepath);
-        console.log('Deleted download files');
+        //await fs.promises.rm(destfilepath, {recursive: true});
+        //await fs.promises.rm(filepath);
+        //console.log('Deleted download files');
         // LAD\d{2}CD 
     }
 }
