@@ -3,11 +3,33 @@ const path = require('path');
 const https = require('https');
 const utils = require('../../OpenOSloader/scripts/utils.js');
 const Papa = require('papaparse');
+const error_handler = require('../../error_handler/error_handler.js');
+const geocode = require('../../geocode/geocode.js');
 
 const headers = {
     'User-Agent':'ACT_ONSUD download (ACT contact-email:technical@actionclimateteignbridge.org)'
 };
-
+const key_mapping = {
+    X: "GRIDGB1E",
+    Y: "GRIDGB1N",
+    PC: "PCDS",
+    WD: "WD25CD",
+    PAR: "PARNCP25CD",
+    OA21: "OA21CD",
+    LSOA21: "lsoa21cd",
+    MSOA21: "msoa21cd"
+}
+const LADCDNM = "LAD25CD"; 
+const required_parish_codes = 
+["E04003192","E04003193","E04012121","E04003191","E04003194","E04003195","E04003196",
+"E04003197","E04003198","E04003199","E04003200","E04003201","E04003202","E04003203",
+"E04003204","E04003235","E04003205","E04003206","E04003207","E04003208","E04003209",
+"E04003210","E04003211","E04003212","E04003213","E04003214","E04003215","E04003216",
+"E04003217","E04003218","E04003219","E04003220","E04003221","E04003222","E04003223",
+"E04003232","E04003225","E04003226","E04003227","E04003228","E04003229","E04003230",
+"E04003231","E04003233","E04003234","E04003236","E04003237","E04003238","E04003239",
+"E04012122","E04013236","E04013237"];
+let required_parish_counts = {};
 function report(feature, arg){
     let properties = feature.properties;
     let cd = new Date(properties.created);
@@ -63,6 +85,13 @@ function parseCSVFile(file, lad_cd) {
             console.log(`Processed ${total_rows_processed} rows matches ${count}`);
         }, 1000);
 
+        let parish_count = {};
+        for(const code of required_parish_codes){
+            parish_count[code] = {
+                count: 0,
+                required: true
+            };
+        }
         Papa.parse(fileStream, {
             chunk: (results, parser )=>{
                 let rows = results.data;
@@ -73,8 +102,44 @@ function parseCSVFile(file, lad_cd) {
                         if ( total_rows_processed === 0 ){
                             let keys = Object.keys(row);
                             console.log('keys: ' + keys);
+                            // check all keys currently used are present
+                            let msgdata = {
+                                available_keys:keys,
+                                wanted_keys:key_mapping,
+                                ladcd_nm:LADCDNM
+                            };
+                            if ( !row[LADCDNM]){
+                                throw new error_handler.MaploadError(
+                                    "LAD code attribute " + LADCDNM + " not available in available keys ",
+                                    msgdata
+                                );
+                            }
+                            let missing_keys = [];
+                            for(const k in key_mapping){
+                                let kv = key_mapping[k];
+                                if ( !row[kv] ){
+                                    missing_keys.push({
+                                        key:k,
+                                        row_key: kv
+                                    });
+                                }
+                            }
+                            if ( missing_keys.length > 0){
+                                let msg = "Some attributes were not available:\n";
+                                let html = '<p>The following attributes were not available:<:p><ul>';
+                                for(const k of missing_keys){
+                                    html += '<li>' + k.key + '  :  ' + k.row_key + '</li>';
+                                }
+                                html += '</ul>';
+                                throw new error_handler.MaploadError(
+                                    msg,
+                                    msgdata,
+                                    html
+                                );
+                            }
                         }
-                        if ( row['LAD25CD'] === lad_cd){
+
+                        if ( row[LADCDNM] === lad_cd){
                             let r = {
                                 X: row.GRIDGB1E,
                                 Y: row.GRIDGB1N,
@@ -87,6 +152,13 @@ function parseCSVFile(file, lad_cd) {
                             };
                             uprndata[row['UPRN']] = r;
                             count++;
+                            if ( !parish_count[r.PAR] ){
+                                parish_count[r.PAR] = {
+                                    count: 0,
+                                    required:false
+                                }
+                            }
+                            parish_count[r.PAR].count++;
                         }
                         total_rows_processed++;
                     }
@@ -96,6 +168,28 @@ function parseCSVFile(file, lad_cd) {
                 clearInterval(progressTimer);
                 console.log('Parsing complete.');
                 console.log(count + ' UPRNs matched');
+                if ( count === 0){
+                    throw new error_handler.MaploadError("No UPRNs matched");
+                }
+                let mismatches = {};
+                let html = '<p>Mismatched parish in district</p><ul>'
+                for(let code in parish_count){
+                    let p = parish_count[code];
+                    if ( p.count === 0 && p.required ){
+                        mismatches[code] = p;
+                        html += '<li>' + code + ' not encountered but required</li>';
+                    }
+                    if ( !p.required ){
+                        mismatches[code] = p;
+                        html += '<li>' + code + ' encountered ' + p.count + ' unexpected</li>';
+                    }
+                }
+                let keys = Object.keys(mismatches);
+                if ( keys.length > 0 ){
+                      console.log('There were mismatched parish codes: ' + JSON.stringify(mismatches, null, 2));
+//                    throw new error_handler.MaploadError("Mismatched parish in district", mismatches, html);
+                }
+                html += '</ul>';
                 resolve(uprndata);
             },
             error: reject,
@@ -179,6 +273,31 @@ async function run(){
         console.log(regionfile + ' was ' + size + ' Mega bytes');
         console.log('Parsing ' + regionfile);
         let uprndata = await parseCSVFile(regionfile, district);
+        //
+        //  Assign legacy parish codes to uprndata
+        //
+        console.log('Reading parishes');
+        let parishes = await utils.getjson('https://sites.stringerhj.co.uk/mapdata/boundaries/TeignbridgeParishes.json');
+        console.log('Geocoding uprns from parishes');
+        let unmatched_parishes = {};
+        for(const uprn in uprndata){
+            let o = uprndata[uprn];
+            let code = geocode.geo_code_point(parishes, o.X, o.Y, 'CODE');
+            if ( code === null){
+                let p = o.PAR;
+                if ( !unmatched_parishes[p]){
+                    unmatched_parishes[p] = {
+                        count: 0
+                    }
+                }
+                unmatched_parishes[p].count++;
+            }
+            uprndata[uprn].PARISH = code;
+        }
+        if ( Object.keys(unmatched_parishes).length > 0 ){
+            console.log('Unmatched parishes: ' + JSON.stringify(unmatched_parishes, null, 2));
+        }
+        console.log('Updating');
         await fs.promises.access(outputpath, fs.constants.R_OK | fs.constants.W_OK).catch( async(err) => {
             if ( err.code === 'ENOENT'){
                 await fs.promises.mkdir(outputpath);
@@ -195,16 +314,17 @@ async function run(){
         versions['uprn_lookup.json'] = version;
         await fs.promises.writeFile(versions_file, JSON.stringify(versions));
         // Now clear up
-        //await fs.promises.rm(destfilepath, {recursive: true});
-        //await fs.promises.rm(filepath);
-        //console.log('Deleted download files');
+        await fs.promises.rm(destfilepath, {recursive: true});
+        await fs.promises.rm(filepath);
+        console.log('Deleted download files');
         // LAD\d{2}CD 
     }
 }
 run().then(()=>{
     console.log('Finished');
     process.exit(0);
-}).catch((err) => {
+}).catch(async (err) => {
+    await error_handler.send_error_email(err, "ONSUD ONS UPRN Loader");
     console.log(err.toString());
     process.exit(-1);
 });
