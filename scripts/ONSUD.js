@@ -10,16 +10,16 @@ const headers = {
     'User-Agent':'ACT_ONSUD download (ACT contact-email:technical@actionclimateteignbridge.org)'
 };
 const key_mapping = {
-    X: "GRIDGB1E",
-    Y: "GRIDGB1N",
-    PC: "PCDS",
-    WD: "WD25CD",
-    PAR: "PARNCP25CD",
-    OA21: "OA21CD",
-    LSOA21: "lsoa21cd",
-    MSOA21: "msoa21cd"
+    X: ["GRIDGB1E"],
+    Y: ["GRIDGB1N"],
+    PC: ["PCDS"],
+    WD: ["WD25CD","WD26CD"],
+    PAR: ["PARNCP25CD","PARNCP26CD"],
+    OA21: ["OA21CD"],
+    LSOA21: ["lsoa21cd","LSOA21CD"],
+    MSOA21: ["msoa21cd","MSOA21CD"]
 }
-const LADCDNM = "LAD25CD"; 
+const LADCDNM = ["LAD25CD","LAD26CD"]; 
 const required_parish_codes = 
 ["E04003192","E04003193","E04012121","E04003191","E04003194","E04003195","E04003196",
 "E04003197","E04003198","E04003199","E04003200","E04003201","E04003202","E04003203",
@@ -92,6 +92,7 @@ function parseCSVFile(file, lad_cd) {
                 required: true
             };
         }
+        let lad_code = null;
         Papa.parse(fileStream, {
             chunk: (results, parser )=>{
                 let rows = results.data;
@@ -108,7 +109,12 @@ function parseCSVFile(file, lad_cd) {
                                 wanted_keys:key_mapping,
                                 ladcd_nm:LADCDNM
                             };
-                            if ( !row[LADCDNM]){
+                            for(let cd of LADCDNM){
+                                if ( row[cd] ){
+                                    lad_code = cd;
+                                }
+                            }
+                            if ( !lad_code ){
                                 throw new error_handler.MaploadError(
                                     "LAD code attribute " + LADCDNM + " not available in available keys ",
                                     msgdata
@@ -117,7 +123,11 @@ function parseCSVFile(file, lad_cd) {
                             let missing_keys = [];
                             for(const k in key_mapping){
                                 let kv = key_mapping[k];
-                                if ( !row[kv] ){
+                                let found = false;
+                                for(let kk of kv){
+                                    if ( row[kk]) found = true;
+                                }
+                                if ( !found ){
                                     missing_keys.push({
                                         key:k,
                                         row_key: kv
@@ -139,17 +149,17 @@ function parseCSVFile(file, lad_cd) {
                             }
                         }
 
-                        if ( row[LADCDNM] === lad_cd){
-                            let r = {
-                                X: row.GRIDGB1E,
-                                Y: row.GRIDGB1N,
-                                PC: row.PCDS,
-                                WD: row.WD25CD,
-                                PAR: row.PARNCP25CD,
-                                OA21: row.OA21CD,
-                                LSOA21: row.lsoa21cd,
-                                MSOA21: row.msoa21cd
-                            };
+                        if ( lad_code && row[lad_code] === lad_cd){
+                            let r = {};
+                            for(const k in key_mapping){
+                                let kv = key_mapping[k];
+                                for(let kk of kv){
+                                    if ( row[kk]) {
+                                        r[k] = row[kk];
+                                    }
+                                }
+                            }
+
                             uprndata[row['UPRN']] = r;
                             count++;
                             if ( !parish_count[r.PAR] ){
@@ -221,6 +231,7 @@ async function run(){
             outputpath = arg.split('=')[1];
         }
     }
+    console.log(`district=${district} downloadpath=${downloadpath} outputpath=${outputpath}`);
     let latest = await find_latest_feature(base_url);
     if ( latest ){
         report(latest, null);
